@@ -115,67 +115,51 @@ echo.
 set INSTALL_DIR=%USERPROFILE%\RemoteGateAgent
 set PYTHON_DIR=%INSTALL_DIR%\python
 set PYTHON=%PYTHON_DIR%\python.exe
-set PIP=%PYTHON_DIR%\Scripts\pip.exe
-set PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+set PIP=%PYTHON_DIR%\python.exe -m pip
+set PYTHON_ZIP_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-embed-amd64.zip
+set GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 :: Create install directory
 if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
 cd /d "%INSTALL_DIR%"
 
 :: Check if embedded Python already exists
-if exist "%PYTHON%" goto :skip_python
-
-:: Check if system Python exists
-python --version >nul 2>&1
-if %errorlevel% equ 0 (
-    echo [INFO] System Python found.
-    set PYTHON=python
-    goto :setup_venv
+if exist "%PYTHON%" (
+    echo [INFO] Python already installed.
+    goto :install_deps
 )
 
-:: Download and install Python silently
-echo [1/5] Downloading Python 3.11 ...
-curl -sL "%PYTHON_URL%" -o python_installer.exe
-if not exist python_installer.exe (
+:: Download Python embeddable zip
+echo [1/6] Downloading Python embeddable ...
+curl -sL "%PYTHON_ZIP_URL%" -o python_embed.zip
+if not exist python_embed.zip (
     echo [ERROR] Failed to download Python. Check internet connection.
     pause
     exit /b 1
 )
 
-echo [2/5] Installing Python (this may take a minute) ...
-python_installer.exe /quiet InstallAllUsers=0 TargetDir="%PYTHON_DIR%" PrependPath=0 Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 CompileAll=0
-if %errorlevel% neq 0 (
-    echo [ERROR] Python installation failed.
-    del python_installer.exe >nul 2>&1
-    pause
-    exit /b 1
-)
-del python_installer.exe >nul 2>&1
-echo [OK] Python installed to %PYTHON_DIR%
-set PIP=%PYTHON_DIR%\Scripts\pip.exe
-goto :install_deps
+:: Extract Python
+echo [2/6] Extracting Python ...
+if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
+powershell -Command "Expand-Archive -Path 'python_embed.zip' -DestinationPath '%PYTHON_DIR%' -Force"
+del python_embed.zip >nul 2>&1
 
-:setup_venv
-:: Use system Python with venv
-if not exist "venv" (
-    echo [2/5] Creating virtual environment...
-    %PYTHON% -m venv venv
-)
-call venv\Scripts\activate.bat
-set PYTHON=python
-set PIP=pip
-goto :install_deps
+:: Enable pip in embedded Python (uncomment import site in pth file)
+powershell -Command "(Get-Content '%PYTHON_DIR%\python311._pth') -replace '#import site','import site' | Set-Content '%PYTHON_DIR%\python311._pth'"
 
-:skip_python
-echo [INFO] Python already installed at %PYTHON_DIR%
-set PIP=%PYTHON_DIR%\Scripts\pip.exe
+:: Install pip
+echo [3/6] Installing pip ...
+curl -sL "%GET_PIP_URL%" -o "%PYTHON_DIR%\get-pip.py"
+"%PYTHON%" "%PYTHON_DIR%\get-pip.py" --quiet --no-warn-script-location
+del "%PYTHON_DIR%\get-pip.py" >nul 2>&1
+echo [OK] Python ready at %PYTHON_DIR%
 
 :install_deps
-echo [3/5] Installing dependencies...
-"%PIP%" install --quiet mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
+echo [4/6] Installing dependencies ...
+"%PYTHON%" -m pip install --quiet --no-warn-script-location mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
 
 :: Write .env
-echo [4/5] Writing configuration...
+echo [5/6] Writing configuration ...
 (
 echo RELAY_URL=$$RELAY_URL$$
 echo AGENT_SECRET=$$AGENT_SECRET$$
@@ -186,7 +170,7 @@ echo DEFAULT_SCALE=0.75
 ) > .env
 
 :: Download agent source files
-echo [5/5] Downloading agent files...
+echo [6/6] Downloading agent files ...
 set BASE_URL=$$BASE_URL$$
 curl -sL "%BASE_URL%/config.py" -o config.py
 curl -sL "%BASE_URL%/capture.py" -o capture.py
@@ -199,12 +183,8 @@ curl -sL "%BASE_URL%/main.py" -o main.py
 (
 echo @echo off
 echo cd /d "%INSTALL_DIR%"
-echo if exist "%PYTHON_DIR%\python.exe" (
-echo     "%PYTHON_DIR%\python.exe" main.py
-echo ) else (
-echo     call venv\Scripts\activate.bat
-echo     python main.py
-echo )
+echo "%PYTHON_DIR%\python.exe" main.py
+echo pause
 ) > start_agent.bat
 
 :: Create desktop shortcut
@@ -216,16 +196,11 @@ echo   Installation complete!
 echo ============================================
 echo.
 echo   Location: %INSTALL_DIR%
-echo   Shortcut: Desktop\RemoteGate Agent
+echo   Shortcut: Desktop - RemoteGate Agent
 echo.
-echo Starting agent...
+echo Starting agent ...
 echo.
-
-if exist "%PYTHON_DIR%\python.exe" (
-    "%PYTHON_DIR%\python.exe" main.py
-) else (
-    python main.py
-)
+"%PYTHON%" main.py
 '''
 
 
