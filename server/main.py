@@ -92,12 +92,12 @@ async def health():
 # ---------------------------------------------------------------------------
 
 @app.websocket("/ws/agent")
-async def ws_agent(ws):
+async def ws_agent(ws: WS):
     await ws_agent_endpoint(ws)
 
 
 @app.websocket("/ws/client")
-async def ws_client(ws):
+async def ws_client(ws: WS):
     await ws_client_endpoint(ws)
 
 
