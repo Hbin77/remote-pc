@@ -9,7 +9,8 @@ export function useMouseCapture(
   isActive: boolean,
 ): void {
   const lastMoveTime = useRef(0);
-  const THROTTLE_MS = 1000 / 60; // 60 events/sec max
+  const MOVE_THROTTLE_MS = 1000 / 60;  // ~16ms for regular move
+  const DRAG_THROTTLE_MS = 1000 / 30;  // ~33ms for drag (less network spam)
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -23,10 +24,12 @@ export function useMouseCapture(
 
     function onMouseMove(e: MouseEvent) {
       const now = performance.now();
-      if (now - lastMoveTime.current < THROTTLE_MS) return;
+      const isDrag = e.buttons > 0;
+      const throttle = isDrag ? DRAG_THROTTLE_MS : MOVE_THROTTLE_MS;
+      if (now - lastMoveTime.current < throttle) return;
       lastMoveTime.current = now;
       const { x, y } = getCoords(e);
-      sendFn(buildMouseMsg('move', x, y));
+      sendFn(buildMouseMsg(isDrag ? 'drag' : 'move', x, y));
     }
 
     function onMouseDown(e: MouseEvent) {
