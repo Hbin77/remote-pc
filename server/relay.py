@@ -116,6 +116,7 @@ class SessionManager:
             result.append({
                 "agent_id": aid,
                 "hostname": info.get("hostname", ""),
+                "status": "online",
                 "resolution": info.get("resolution", [0, 0]),
                 "has_client": aid in self.clients,
             })
