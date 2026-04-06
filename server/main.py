@@ -150,8 +150,8 @@ if not exist "%PYTHON_DIR%" mkdir "%PYTHON_DIR%"
 powershell -Command "Expand-Archive -Path 'python_embed.zip' -DestinationPath '%PYTHON_DIR%' -Force"
 del python_embed.zip >nul 2>&1
 
-:: Enable pip in embedded Python (uncomment import site in pth file)
-powershell -Command "(Get-Content '%PYTHON_DIR%\python311._pth') -replace '#import site','import site' | Set-Content '%PYTHON_DIR%\python311._pth'"
+:: Enable pip and add agent directory to Python path
+powershell -Command "$p = Get-Content '%PYTHON_DIR%\python311._pth'; $p = $p -replace '#import site','import site'; if ($p -notcontains '%INSTALL_DIR%') { $p += '%INSTALL_DIR%' }; $p | Set-Content '%PYTHON_DIR%\python311._pth'"
 
 :: Install pip
 echo [3/6] Installing pip ...
