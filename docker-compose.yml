@@ -1,7 +1,8 @@
-version: '3.8'
 services:
   remotegate:
-    build: ./server
+    build:
+      context: .
+      dockerfile: server/Dockerfile
     ports:
       - "8900:8900"
     env_file:
