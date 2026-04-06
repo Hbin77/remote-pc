@@ -1,5 +1,6 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.0
+websockets>=10.4,<14
 pyjwt==2.9.0
 bcrypt==4.2.0
 aiosqlite==0.20.0
