@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, WebSocket as WS
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -59,6 +59,14 @@ app = FastAPI(
 )
 
 # No CORS middleware needed — frontend and API are served from the same origin
+
+# Debug: minimal WebSocket test
+@app.websocket("/ws/test")
+async def ws_test(websocket: WS):
+    logger.info(">>> WS TEST ENDPOINT HIT <<<")
+    await websocket.accept()
+    await websocket.send_text("hello")
+    await websocket.close()
 
 # Auth REST endpoints
 app.include_router(auth_router)
