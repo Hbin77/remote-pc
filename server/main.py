@@ -107,6 +107,12 @@ async def ws_client(ws):
 
 _INSTALLER_TEMPLATE = r'''@echo off
 chcp 65001 >nul
+:: Keep window open on any error
+if "%~1"=="" (
+    cmd /k "%~f0" run
+    exit /b
+)
+
 echo ============================================
 echo   RemoteGate Agent Installer
 echo ============================================
