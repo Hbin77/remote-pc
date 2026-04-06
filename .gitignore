@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Build
+dist/
+build/
+*.exe
+
+# Environment
+.env
+*.db
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Vite
+web/dist/
+
+# Python
+*.pyc
+*.pyo

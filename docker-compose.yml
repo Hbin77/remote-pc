@@ -1,0 +1,11 @@
+version: '3.8'
+services:
+  remotegate:
+    build: ./server
+    ports:
+      - "8900:8900"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
