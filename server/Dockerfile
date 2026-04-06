@@ -12,6 +12,7 @@ WORKDIR /app
 COPY server/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server/ .
+COPY agent/ /app/agent_src/
 COPY --from=frontend /web/dist /app/static
 RUN mkdir -p /app/data
 EXPOSE 8900

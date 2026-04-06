@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
 from auth import router as auth_router
@@ -102,6 +102,137 @@ async def ws_agent(ws):
 @app.websocket("/ws/client")
 async def ws_client(ws):
     await ws_client_endpoint(ws)
+
+
+# ---------------------------------------------------------------------------
+# Agent installer download
+# ---------------------------------------------------------------------------
+
+_INSTALLER_TEMPLATE = r'''@echo off
+chcp 65001 >nul
+echo ============================================
+echo   RemoteGate Agent Installer
+echo ============================================
+echo.
+
+:: Check Python
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [ERROR] Python is not installed.
+    echo Download from https://www.python.org/downloads/
+    echo Make sure to check "Add Python to PATH" during install.
+    pause
+    exit /b 1
+)
+
+:: Set install directory
+set INSTALL_DIR=%USERPROFILE%\RemoteGateAgent
+echo Installing to %INSTALL_DIR% ...
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+cd /d "%INSTALL_DIR%"
+
+:: Create virtual environment
+if not exist "venv" (
+    echo Creating virtual environment...
+    python -m venv venv
+)
+
+:: Activate and install
+call venv\Scripts\activate.bat
+echo Installing dependencies...
+pip install --quiet mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
+
+:: Write .env
+echo Writing configuration...
+(
+echo RELAY_URL=$$RELAY_URL$$
+echo AGENT_SECRET=$$AGENT_SECRET$$
+echo AGENT_ID=%COMPUTERNAME%
+echo DEFAULT_FPS=24
+echo DEFAULT_QUALITY=50
+echo DEFAULT_SCALE=0.75
+) > .env
+
+:: Download agent source files
+echo Downloading agent files...
+set BASE_URL=$$BASE_URL$$
+curl -sL "%BASE_URL%/config.py" -o config.py
+curl -sL "%BASE_URL%/capture.py" -o capture.py
+curl -sL "%BASE_URL%/encoder.py" -o encoder.py
+curl -sL "%BASE_URL%/input_handler.py" -o input_handler.py
+curl -sL "%BASE_URL%/connection.py" -o connection.py
+curl -sL "%BASE_URL%/main.py" -o main.py
+
+:: Create start script
+(
+echo @echo off
+echo cd /d "%INSTALL_DIR%"
+echo call venv\Scripts\activate.bat
+echo python main.py
+) > start_agent.bat
+
+:: Create desktop shortcut via PowerShell
+powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'RemoteGate Agent.lnk')); $s.TargetPath = '%INSTALL_DIR%\start_agent.bat'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.IconLocation = 'shell32.dll,21'; $s.Save()"
+
+echo.
+echo ============================================
+echo   Installation complete!
+echo ============================================
+echo.
+echo Agent installed to: %INSTALL_DIR%
+echo Desktop shortcut created: RemoteGate Agent
+echo.
+echo Starting agent now...
+echo.
+python main.py
+'''
+
+
+@app.get("/api/installer")
+async def download_installer(request: Request):
+    """Generate a Windows batch installer script with embedded config."""
+    host = request.headers.get("host", "remote.hbinserver.cloud")
+    scheme = request.headers.get("x-forwarded-proto", "https")
+    relay_url = f"wss://{host}" if scheme == "https" else f"ws://{host}"
+    base_url = f"{scheme}://{host}/api/agent-source"
+
+    script = _INSTALLER_TEMPLATE
+    script = script.replace("$$RELAY_URL$$", relay_url)
+    script = script.replace("$$AGENT_SECRET$$", settings.AGENT_SECRET)
+    script = script.replace("$$BASE_URL$$", base_url)
+
+    return PlainTextResponse(
+        content=script,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=install_remotegate.bat"},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Agent source file serving
+# ---------------------------------------------------------------------------
+
+AGENT_DIR = Path(__file__).parent.parent / "agent"
+AGENT_DOCKER_DIR = Path("/app/agent_src")
+
+_ALLOWED_AGENT_FILES = {"config.py", "capture.py", "encoder.py", "input_handler.py", "connection.py", "main.py"}
+
+
+def _get_agent_dir() -> Path:
+    if AGENT_DOCKER_DIR.is_dir():
+        return AGENT_DOCKER_DIR
+    return AGENT_DIR
+
+
+@app.get("/api/agent-source/{filename}")
+async def serve_agent_source(filename: str):
+    """Serve individual agent Python source files."""
+    if filename not in _ALLOWED_AGENT_FILES:
+        raise HTTPException(status_code=404, detail="File not found")
+    file_path = _get_agent_dir() / filename
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(file_path, media_type="text/plain")
 
 
 # ---------------------------------------------------------------------------
