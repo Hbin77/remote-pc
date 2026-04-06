@@ -115,35 +115,70 @@ echo   RemoteGate Agent Installer
 echo ============================================
 echo.
 
-:: Check Python
+set INSTALL_DIR=%USERPROFILE%\RemoteGateAgent
+set PYTHON_DIR=%INSTALL_DIR%\python
+set PYTHON=%PYTHON_DIR%\python.exe
+set PIP=%PYTHON_DIR%\Scripts\pip.exe
+set PYTHON_URL=https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe
+
+:: Create install directory
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
+cd /d "%INSTALL_DIR%"
+
+:: Check if embedded Python already exists
+if exist "%PYTHON%" goto :skip_python
+
+:: Check if system Python exists
 python --version >nul 2>&1
-if %errorlevel% neq 0 (
-    echo [ERROR] Python is not installed.
-    echo Download from https://www.python.org/downloads/
-    echo Make sure to check "Add Python to PATH" during install.
+if %errorlevel% equ 0 (
+    echo [INFO] System Python found.
+    set PYTHON=python
+    goto :setup_venv
+)
+
+:: Download and install Python silently
+echo [1/5] Downloading Python 3.11 ...
+curl -sL "%PYTHON_URL%" -o python_installer.exe
+if not exist python_installer.exe (
+    echo [ERROR] Failed to download Python. Check internet connection.
     pause
     exit /b 1
 )
 
-:: Set install directory
-set INSTALL_DIR=%USERPROFILE%\RemoteGateAgent
-echo Installing to %INSTALL_DIR% ...
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-cd /d "%INSTALL_DIR%"
-
-:: Create virtual environment
-if not exist "venv" (
-    echo Creating virtual environment...
-    python -m venv venv
+echo [2/5] Installing Python (this may take a minute) ...
+python_installer.exe /quiet InstallAllUsers=0 TargetDir="%PYTHON_DIR%" PrependPath=0 Include_launcher=0 Include_test=0 Include_doc=0 Include_tcltk=0 CompileAll=0
+if %errorlevel% neq 0 (
+    echo [ERROR] Python installation failed.
+    del python_installer.exe >nul 2>&1
+    pause
+    exit /b 1
 )
+del python_installer.exe >nul 2>&1
+echo [OK] Python installed to %PYTHON_DIR%
+set PIP=%PYTHON_DIR%\Scripts\pip.exe
+goto :install_deps
 
-:: Activate and install
+:setup_venv
+:: Use system Python with venv
+if not exist "venv" (
+    echo [2/5] Creating virtual environment...
+    %PYTHON% -m venv venv
+)
 call venv\Scripts\activate.bat
-echo Installing dependencies...
-pip install --quiet mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
+set PYTHON=python
+set PIP=pip
+goto :install_deps
+
+:skip_python
+echo [INFO] Python already installed at %PYTHON_DIR%
+set PIP=%PYTHON_DIR%\Scripts\pip.exe
+
+:install_deps
+echo [3/5] Installing dependencies...
+"%PIP%" install --quiet mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
 
 :: Write .env
-echo Writing configuration...
+echo [4/5] Writing configuration...
 (
 echo RELAY_URL=$$RELAY_URL$$
 echo AGENT_SECRET=$$AGENT_SECRET$$
@@ -154,7 +189,7 @@ echo DEFAULT_SCALE=0.75
 ) > .env
 
 :: Download agent source files
-echo Downloading agent files...
+echo [5/5] Downloading agent files...
 set BASE_URL=$$BASE_URL$$
 curl -sL "%BASE_URL%/config.py" -o config.py
 curl -sL "%BASE_URL%/capture.py" -o capture.py
@@ -167,11 +202,15 @@ curl -sL "%BASE_URL%/main.py" -o main.py
 (
 echo @echo off
 echo cd /d "%INSTALL_DIR%"
-echo call venv\Scripts\activate.bat
-echo python main.py
+echo if exist "%PYTHON_DIR%\python.exe" (
+echo     "%PYTHON_DIR%\python.exe" main.py
+echo ) else (
+echo     call venv\Scripts\activate.bat
+echo     python main.py
+echo )
 ) > start_agent.bat
 
-:: Create desktop shortcut via PowerShell
+:: Create desktop shortcut
 powershell -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut([System.IO.Path]::Combine([Environment]::GetFolderPath('Desktop'), 'RemoteGate Agent.lnk')); $s.TargetPath = '%INSTALL_DIR%\start_agent.bat'; $s.WorkingDirectory = '%INSTALL_DIR%'; $s.IconLocation = 'shell32.dll,21'; $s.Save()"
 
 echo.
@@ -179,12 +218,17 @@ echo ============================================
 echo   Installation complete!
 echo ============================================
 echo.
-echo Agent installed to: %INSTALL_DIR%
-echo Desktop shortcut created: RemoteGate Agent
+echo   Location: %INSTALL_DIR%
+echo   Shortcut: Desktop\RemoteGate Agent
 echo.
-echo Starting agent now...
+echo Starting agent...
 echo.
-python main.py
+
+if exist "%PYTHON_DIR%\python.exe" (
+    "%PYTHON_DIR%\python.exe" main.py
+) else (
+    python main.py
+)
 '''
 
 
