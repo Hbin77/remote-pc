@@ -16,4 +16,4 @@ COPY agent/ /app/agent_src/
 COPY --from=frontend /web/dist /app/static
 RUN mkdir -p /app/data
 EXPOSE 8900
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8900", "--ws", "wsproto"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8900"]
