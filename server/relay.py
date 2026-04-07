@@ -196,8 +196,18 @@ async def ws_agent_endpoint(ws: WebSocket) -> None:
 
                 if msg_type == "ping":
                     await ws.send_json({"type": "pong", "ts": msg.get("ts", time.time())})
-                    # Update last_seen
                     await update_agent_status(settings.DB_PATH, agent_id, "online")
+
+                elif msg_type in ("webrtc_answer", "ice_candidate"):
+                    # Forward WebRTC signaling from agent to client
+                    client_ws = manager.clients.get(agent_id)
+                    if client_ws is not None:
+                        try:
+                            await client_ws.send_text(json.dumps(msg))
+                        except Exception:
+                            pass
+                    logger.debug("Agent %s sent %s -> forwarded to client", agent_id, msg_type)
+
                 else:
                     logger.debug("Agent %s sent unhandled message type: %s", agent_id, msg_type)
 
@@ -314,6 +324,17 @@ async def ws_client_endpoint(ws: WebSocket) -> None:
                             "type": "error",
                             "message": "No active session",
                         })
+
+                elif msg_type in ("webrtc_offer", "ice_candidate"):
+                    # Forward WebRTC signaling from client to agent
+                    if linked_agent:
+                        agent_ws = manager.agents.get(linked_agent)
+                        if agent_ws is not None:
+                            try:
+                                await agent_ws.send_text(json.dumps(msg))
+                            except Exception:
+                                pass
+                        logger.debug("Client sent %s -> forwarded to agent %s", msg_type, linked_agent)
 
                 elif msg_type == "ping":
                     await ws.send_json({"type": "pong", "ts": msg.get("ts", time.time())})

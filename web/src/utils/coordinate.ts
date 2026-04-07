@@ -1,11 +1,11 @@
 export function toRemoteCoords(
-  canvasEl: HTMLCanvasElement,
+  element: HTMLCanvasElement | HTMLVideoElement,
   clientX: number,
   clientY: number,
   remoteW: number,
   remoteH: number,
 ): { x: number; y: number } {
-  const rect = canvasEl.getBoundingClientRect();
+  const rect = element.getBoundingClientRect();
   const scaleX = remoteW / rect.width;
   const scaleY = remoteH / rect.height;
   const x = Math.round((clientX - rect.left) * scaleX);
