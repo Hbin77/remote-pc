@@ -3,7 +3,7 @@ import { toRemoteCoords } from '../utils/coordinate';
 import { buildMouseMsg, type MouseMsg } from '../utils/protocol';
 
 export function useMouseCapture(
-  canvasRef: React.RefObject<HTMLCanvasElement | null>,
+  canvasRef: React.RefObject<HTMLCanvasElement | HTMLVideoElement | null>,
   remoteResolution: [number, number],
   sendFn: (msg: MouseMsg) => void,
   isActive: boolean,
@@ -62,20 +62,21 @@ export function useMouseCapture(
       sendFn(buildMouseMsg('scroll', x, y, undefined, delta));
     }
 
-    canvas.addEventListener('mousemove', onMouseMove);
-    canvas.addEventListener('mousedown', onMouseDown);
-    canvas.addEventListener('mouseup', onMouseUp);
-    canvas.addEventListener('dblclick', onDblClick);
-    canvas.addEventListener('contextmenu', onContextMenu);
-    canvas.addEventListener('wheel', onWheel, { passive: false });
+    const el = canvas as HTMLElement;
+    el.addEventListener('mousemove', onMouseMove as EventListener);
+    el.addEventListener('mousedown', onMouseDown as EventListener);
+    el.addEventListener('mouseup', onMouseUp as EventListener);
+    el.addEventListener('dblclick', onDblClick as EventListener);
+    el.addEventListener('contextmenu', onContextMenu as EventListener);
+    el.addEventListener('wheel', onWheel as EventListener, { passive: false });
 
     return () => {
-      canvas.removeEventListener('mousemove', onMouseMove);
-      canvas.removeEventListener('mousedown', onMouseDown);
-      canvas.removeEventListener('mouseup', onMouseUp);
-      canvas.removeEventListener('dblclick', onDblClick);
-      canvas.removeEventListener('contextmenu', onContextMenu);
-      canvas.removeEventListener('wheel', onWheel);
+      el.removeEventListener('mousemove', onMouseMove as EventListener);
+      el.removeEventListener('mousedown', onMouseDown as EventListener);
+      el.removeEventListener('mouseup', onMouseUp as EventListener);
+      el.removeEventListener('dblclick', onDblClick as EventListener);
+      el.removeEventListener('contextmenu', onContextMenu as EventListener);
+      el.removeEventListener('wheel', onWheel as EventListener);
     };
   }, [canvasRef, remoteResolution, sendFn, isActive]);
 }

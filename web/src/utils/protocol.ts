@@ -37,7 +37,26 @@ export interface AgentInfo {
   resolution: [number, number];
 }
 
-export type ProtocolMsg = AuthMsg | MouseMsg | KeyMsg | SessionMsg | ConfigMsg;
+export interface WebRTCOfferMsg {
+  type: 'webrtc_offer';
+  sdp: string;
+}
+
+export interface WebRTCAnswerMsg {
+  type: 'webrtc_answer';
+  sdp: string;
+}
+
+export interface ICECandidateMsg {
+  type: 'ice_candidate';
+  candidate: {
+    candidate: string;
+    sdpMid: string | null;
+    sdpMLineIndex: number | null;
+  };
+}
+
+export type ProtocolMsg = AuthMsg | MouseMsg | KeyMsg | SessionMsg | ConfigMsg | WebRTCOfferMsg | WebRTCAnswerMsg | ICECandidateMsg;
 
 export interface FrameData {
   frameNum: number;

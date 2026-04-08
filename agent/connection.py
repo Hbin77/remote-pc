@@ -16,6 +16,7 @@ from capture import ScreenCapture
 from config import AgentConfig
 from encoder import encode_frame
 from input_handler import InputHandler
+from webrtc_peer import AgentPeerConnection
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,10 @@ class AgentConnection:
 
         # Heartbeat state
         self._last_pong = time.time()
+
+        # WebRTC peer connection (None until a webrtc_offer is received)
+        self._peer: AgentPeerConnection | None = None
+        self._webrtc_active = False
 
         # Executor for running blocking input operations
         self._executor_loop: asyncio.AbstractEventLoop | None = None
@@ -105,13 +110,12 @@ class AgentConnection:
     async def _stream_loop(self, ws: websockets.WebSocketClientProtocol):
         """Continuously capture, encode, and send screen frames.
 
-        Maintains target FPS by measuring how long each capture+send cycle
-        takes and adjusting sleep time. Skips frames if sending falls behind.
+        Stops automatically when WebRTC becomes active.
         """
         logger.info("Stream loop started (fps=%d, quality=%d, scale=%.2f)",
                      self._fps, self._quality, self._scale)
 
-        while True:
+        while not self._webrtc_active:
             frame_start = time.monotonic()
 
             try:
@@ -151,7 +155,8 @@ class AgentConnection:
     async def _receive_loop(self, ws: websockets.WebSocketClientProtocol):
         """Receive and process messages from the relay server.
 
-        Handles input commands (mouse/keyboard), config updates, and pong messages.
+        Handles input commands (mouse/keyboard), config updates, pong messages,
+        and WebRTC signaling (offers and ICE candidates).
         Input handling is dispatched to a thread executor since pynput operations
         are blocking.
         """
@@ -167,7 +172,13 @@ class AgentConnection:
                 data = json.loads(message)
                 msg_type = data.get("type")
 
-                if msg_type in ("mouse", "key"):
+                if msg_type == "webrtc_offer":
+                    await self._handle_webrtc_offer(ws, data)
+
+                elif msg_type == "ice_candidate":
+                    await self._handle_ice_candidate(data)
+
+                elif msg_type in ("mouse", "key"):
                     # Run blocking pynput calls in thread executor
                     await loop.run_in_executor(
                         None, self._input_handler.handle_input, data
@@ -192,6 +203,60 @@ class AgentConnection:
                 logger.exception("Error processing message")
 
         logger.info("Receive loop ended (connection closed)")
+
+    async def _handle_webrtc_offer(self, ws: websockets.WebSocketClientProtocol, data: dict):
+        """Handle a WebRTC offer: create peer connection, generate answer, send it back.
+
+        Args:
+            ws: The WebSocket connection for sending the answer.
+            data: Dict containing "sdp" key with the offer SDP.
+        """
+        sdp = data.get("sdp", "")
+        if not sdp:
+            logger.warning("Received webrtc_offer with empty SDP")
+            return
+
+        # Close any existing peer connection
+        if self._peer is not None:
+            await self._peer.close()
+
+        logger.info("Received WebRTC offer, creating peer connection")
+        self._peer = AgentPeerConnection(
+            capture=self._capture,
+            input_handler=self._input_handler,
+            ice_servers=data.get("ice_servers"),
+        )
+
+        answer_sdp = await self._peer.handle_offer(sdp)
+        self._webrtc_active = True
+
+        # Send the answer back via WebSocket
+        answer_msg = json.dumps({
+            "type": "webrtc_answer",
+            "sdp": answer_sdp,
+        })
+        await ws.send(answer_msg)
+        logger.info("Sent WebRTC answer")
+
+        # Send any collected local ICE candidates (wrapped in candidate key)
+        for candidate in self._peer.ice_candidates:
+            candidate_msg = json.dumps({
+                "type": "ice_candidate",
+                "candidate": candidate,
+            })
+            await ws.send(candidate_msg)
+        logger.info("Sent %d local ICE candidates", len(self._peer.ice_candidates))
+
+    async def _handle_ice_candidate(self, data: dict):
+        """Forward a remote ICE candidate to the peer connection.
+
+        Args:
+            data: Dict with "candidate", "sdpMid", "sdpMLineIndex" keys.
+        """
+        if self._peer is None:
+            logger.warning("Received ICE candidate but no peer connection exists")
+            return
+        await self._peer.add_ice_candidate(data)
 
     def _apply_config(self, data: dict):
         """Apply dynamic configuration changes from the relay server.
@@ -237,9 +302,10 @@ class AgentConnection:
     async def run(self):
         """Main run loop with automatic reconnection and exponential backoff.
 
-        Connects to the relay server and runs the stream, receive, and heartbeat
-        loops concurrently. On disconnection or error, waits with exponential
-        backoff before retrying.
+        Connects to the relay server, then waits up to 5 seconds for a WebRTC
+        offer. If received, uses WebRTC for video (no stream_loop). Otherwise,
+        falls back to WebSocket-based frame streaming. On disconnection or error,
+        waits with exponential backoff before retrying.
         """
         backoff = BACKOFF_BASE
 
@@ -249,8 +315,11 @@ class AgentConnection:
                 # Reset backoff on successful connection
                 backoff = BACKOFF_BASE
                 self._last_pong = time.time()
+                self._webrtc_active = False
 
-                # Run all three loops concurrently; if any exits, we reconnect
+                # Start all loops: stream starts immediately as fallback.
+                # When a WebRTC offer arrives, _stream_loop checks
+                # _webrtc_active and stops itself.
                 await asyncio.gather(
                     self._stream_loop(ws),
                     self._receive_loop(ws),
@@ -269,9 +338,26 @@ class AgentConnection:
             except Exception:
                 logger.exception("Unexpected error in agent run loop")
 
+            # Clean up any active peer connection on disconnect
+            if self._peer is not None:
+                try:
+                    await self._peer.close()
+                except Exception:
+                    logger.exception("Error closing peer connection during reconnect")
+                self._peer = None
+                self._webrtc_active = False
+
             logger.info("Reconnecting in %d seconds...", backoff)
             await asyncio.sleep(backoff)
             backoff = min(backoff * BACKOFF_FACTOR, BACKOFF_MAX)
+
+    async def _close_peer(self):
+        """Close the WebRTC peer connection if active."""
+        if self._peer is not None:
+            await self._peer.close()
+            self._peer = None
+            self._webrtc_active = False
+            logger.info("Peer connection closed")
 
     def close(self):
         """Clean up resources."""

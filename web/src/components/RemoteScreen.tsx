@@ -1,7 +1,8 @@
-import { useRef, useEffect, useCallback } from 'react';
+import { useRef, useEffect, useCallback, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useSessionStore } from '../stores/sessionStore';
 import { useWebSocket } from '../hooks/useWebSocket';
+import { useWebRTC } from '../hooks/useWebRTC';
 import { useMouseCapture } from '../hooks/useMouseCapture';
 import { useKeyboardCapture } from '../hooks/useKeyboardCapture';
 import { buildSessionMsg, type FrameData, type MouseMsg, type KeyMsg } from '../utils/protocol';
@@ -25,6 +26,8 @@ export function RemoteScreen() {
   const fpsInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const sessionStarted = useRef(false);
 
+  const [webrtcEnabled, setWebrtcEnabled] = useState(false);
+
   const wsUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws/client`;
 
   const onFrame = useCallback((frame: FrameData) => {
@@ -44,6 +47,8 @@ export function RemoteScreen() {
         if (res) {
           setRemoteResolution(res[0], res[1]);
         }
+        // Enable WebRTC after session_start response
+        setWebrtcEnabled(true);
       } else if (msg.type === 'resolution_changed') {
         const res = msg.resolution as [number, number] | undefined;
         if (res) {
@@ -60,12 +65,20 @@ export function RemoteScreen() {
     [setRemoteResolution, updateStats],
   );
 
-  const { send, disconnect, isConnected } = useWebSocket({
+  const { send, disconnect, isConnected, wsRef } = useWebSocket({
     url: wsUrl,
     token: token ?? '',
     onFrame,
     onMessage,
     enabled: !!token && !!agentId,
+  });
+
+  // WebRTC hook
+  const { videoRef, sendInput, isP2PConnected } = useWebRTC({
+    signalingWs: wsRef,
+    agentId: agentId ?? null,
+    isSignalingConnected: isConnected,
+    enabled: webrtcEnabled,
   });
 
   // Send session_start once connected
@@ -79,11 +92,15 @@ export function RemoteScreen() {
     if (!isConnected) {
       sessionStarted.current = false;
       setConnected(false);
+      setWebrtcEnabled(false);
     }
   }, [isConnected, agentId, send, setAgentId, setConnected]);
 
-  // Render loop
+  // Render loop for canvas fallback
   useEffect(() => {
+    // Skip canvas rendering when P2P is connected
+    if (isP2PConnected) return;
+
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -104,7 +121,7 @@ export function RemoteScreen() {
     return () => {
       cancelAnimationFrame(animFrameId.current);
     };
-  }, []);
+  }, [isP2PConnected]);
 
   // FPS counter
   useEffect(() => {
@@ -120,18 +137,35 @@ export function RemoteScreen() {
     };
   }, [updateStats]);
 
-  // Mouse capture
+  // Mouse capture - use sendInput via DataChannel when P2P, WS otherwise
   const sendMouse = useCallback(
-    (msg: MouseMsg) => send(msg),
-    [send],
+    (msg: MouseMsg) => {
+      if (isP2PConnected) {
+        sendInput(msg);
+      } else {
+        send(msg);
+      }
+    },
+    [isP2PConnected, sendInput, send],
   );
 
-  useMouseCapture(canvasRef, remoteResolution, sendMouse, isConnected);
+  useMouseCapture(
+    isP2PConnected ? videoRef : canvasRef,
+    remoteResolution,
+    sendMouse,
+    isConnected,
+  );
 
-  // Keyboard capture
+  // Keyboard capture - use sendInput via DataChannel when P2P, WS otherwise
   const sendKey = useCallback(
-    (msg: KeyMsg) => send(msg),
-    [send],
+    (msg: KeyMsg) => {
+      if (isP2PConnected) {
+        sendInput(msg);
+      } else {
+        send(msg);
+      }
+    },
+    [isP2PConnected, sendInput, send],
   );
 
   useKeyboardCapture(isConnected, sendKey);
@@ -142,6 +176,7 @@ export function RemoteScreen() {
     disconnect();
     setConnected(false);
     setAgentId(null);
+    setWebrtcEnabled(false);
     navigate('/', { replace: true });
   }, [send, disconnect, setConnected, setAgentId, navigate]);
 
@@ -163,6 +198,8 @@ export function RemoteScreen() {
 
   if (!token) return null;
 
+  const connectionMode = isP2PConnected ? 'P2P' : isConnected ? 'Relay' : undefined;
+
   return (
     <div className="flex h-screen flex-col bg-black">
       <Toolbar
@@ -172,18 +209,32 @@ export function RemoteScreen() {
       />
 
       <div className="flex flex-1 items-center justify-center overflow-hidden">
-        <canvas
-          ref={canvasRef}
-          tabIndex={0}
-          autoFocus
-          className="max-h-full max-w-full outline-none"
-          style={{
-            aspectRatio: `${remoteResolution[0]} / ${remoteResolution[1]}`,
-          }}
-        />
+        {isP2PConnected ? (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            tabIndex={0}
+            className="max-h-full max-w-full outline-none"
+            style={{
+              aspectRatio: `${remoteResolution[0]} / ${remoteResolution[1]}`,
+            }}
+          />
+        ) : (
+          <canvas
+            ref={canvasRef}
+            tabIndex={0}
+            autoFocus
+            className="max-h-full max-w-full outline-none"
+            style={{
+              aspectRatio: `${remoteResolution[0]} / ${remoteResolution[1]}`,
+            }}
+          />
+        )}
       </div>
 
-      <StatusBar />
+      <StatusBar connectionMode={connectionMode} />
     </div>
   );
 }

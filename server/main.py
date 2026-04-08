@@ -9,7 +9,7 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Request, WebSocket as WS
+from fastapi import FastAPI, HTTPException, Request, WebSocket as WS
 from fastapi.responses import FileResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -60,14 +60,6 @@ app = FastAPI(
 
 # No CORS middleware needed — frontend and API are served from the same origin
 
-# Debug: minimal WebSocket test
-@app.websocket("/ws/test")
-async def ws_test(websocket: WS):
-    logger.info(">>> WS TEST ENDPOINT HIT <<<")
-    await websocket.accept()
-    await websocket.send_text("hello")
-    await websocket.close()
-
 # Auth REST endpoints
 app.include_router(auth_router)
 
@@ -107,11 +99,6 @@ async def ws_client(ws: WS):
 
 _INSTALLER_TEMPLATE = r'''@echo off
 chcp 65001 >nul
-:: Keep window open on any error
-if "%~1"=="" (
-    cmd /k "%~f0" run
-    exit /b
-)
 
 echo ============================================
 echo   RemoteGate Agent Installer
@@ -162,7 +149,7 @@ echo [OK] Python ready at %PYTHON_DIR%
 
 :install_deps
 echo [4/6] Installing dependencies ...
-"%PYTHON%" -m pip install --quiet --no-warn-script-location mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1
+"%PYTHON%" -m pip install --quiet --no-warn-script-location mss==9.0.2 Pillow==10.4.0 pynput==1.7.7 websockets==13.0 python-dotenv==1.0.1 aiortc
 
 :: Write .env
 echo [5/6] Writing configuration ...
@@ -184,6 +171,7 @@ curl -sL "%BASE_URL%/encoder.py" -o encoder.py
 curl -sL "%BASE_URL%/input_handler.py" -o input_handler.py
 curl -sL "%BASE_URL%/connection.py" -o connection.py
 curl -sL "%BASE_URL%/main.py" -o main.py
+curl -sL "%BASE_URL%/webrtc_peer.py" -o webrtc_peer.py
 
 :: Create start script
 (
@@ -207,6 +195,7 @@ echo.
 echo Starting agent ...
 echo.
 "%PYTHON%" main.py
+pause
 '''
 
 
@@ -237,7 +226,7 @@ async def download_installer(request: Request):
 AGENT_DIR = Path(__file__).parent.parent / "agent"
 AGENT_DOCKER_DIR = Path("/app/agent_src")
 
-_ALLOWED_AGENT_FILES = {"config.py", "capture.py", "encoder.py", "input_handler.py", "connection.py", "main.py"}
+_ALLOWED_AGENT_FILES = {"config.py", "capture.py", "encoder.py", "input_handler.py", "connection.py", "main.py", "webrtc_peer.py"}
 
 
 def _get_agent_dir() -> Path:
