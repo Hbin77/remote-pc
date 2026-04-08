@@ -1,0 +1,12 @@
+services:
+  remotegate:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "8900:8900"
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
